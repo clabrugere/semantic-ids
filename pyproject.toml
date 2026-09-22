@@ -1,0 +1,31 @@
+[project]
+name = "semantic-ids"
+version = "0.1.0"
+description = "Learn codebooks for semantic identifiers using RQ-VAE"
+readme = "README.md"
+authors = [
+    { name = "Clément Labrugere", email = "clabrugere@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5.3",
+    "torch>=2.13.0",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff", "pyrefly"]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.pyrefly]
+project-includes = ["src/semantic_ids"]
+python-version = "3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
