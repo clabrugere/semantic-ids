@@ -31,17 +31,17 @@ class RQVAE(nn.Module):
         latent_dim: int,
         num_levels: int,
         num_codes: int,
-        encoder_hidden: Sequence[int],
-        decoder_hidden: Sequence[int],
+        encoder_hidden_dims: Sequence[int],
+        decoder_hidden_dims: Sequence[int],
         commitment: float = 0.25,
         normalize_codebook: bool = True,
         codebook_update: CodebookUpdate = CodebookUpdate.GRADIENT,
     ):
         super().__init__()
         quantizer = EmaResidualQuantizer if codebook_update is CodebookUpdate.EMA else ResidualQuantizer
-        self.encoder = MLP(input_dim, latent_dim, encoder_hidden)
+        self.encoder = MLP(input_dim, latent_dim, encoder_hidden_dims)
         self.quantizer = quantizer(num_levels, num_codes, latent_dim, commitment, normalize_codebook)
-        self.decoder = MLP(latent_dim, input_dim, decoder_hidden)
+        self.decoder = MLP(latent_dim, input_dim, decoder_hidden_dims)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Returns ``(reconstructed, codes, vq_loss)``."""
@@ -93,6 +93,5 @@ class RQVAE(nn.Module):
 
         Within a collision group, the disambiguation ordinal is ranked by ascending distance to the group's centroid.
         """
-        self.eval()
         prefixes, residual_norm = self.encode_with_residual_norm(data, batch_size)  # [M, K-1], [M]
         return SemanticIds.from_codes(prefixes, self.quantizer.num_codes, sort_key=residual_norm)

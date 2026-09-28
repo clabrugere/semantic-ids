@@ -7,7 +7,12 @@ from torch import Tensor, nn
 from semantic_ids.kmeans import kmeans, nearest_code
 
 
-def quantize_residuals(z: Tensor, codebooks: Tensor, num_levels: int, normalize: bool) -> tuple[Tensor, Tensor, Tensor]:
+def quantize_residuals(
+    z: Tensor,
+    codebooks: Tensor,
+    num_levels: int,
+    normalize: bool,
+) -> tuple[Tensor, Tensor, Tensor]:
     """Run the residual chain. Returns ``(entries [num_levels, B, dim], residuals [num_levels, B, dim], codes [B, num_levels])``.
 
     ``residuals[k]`` is the residual entering step k (so ``residuals[0] is z``) and ``entries[k]`` is the code picked for it.
@@ -167,7 +172,7 @@ class EmaResidualQuantizer(ResidualQuantizer):
 
         # F.mse_loss means over K*B*dim, so scale by K to keep the per-step sum of per-step means:
         # without it the codebook's effective learning rate and the commitment weight both drop by K.
-        residual_loss = F.mse_loss(entries, residuals.detach())  # move codebooks towards the residuals
+        residual_loss = F.mse_loss(entries, residuals.detach())  # for EMA learning, codebooks are frozen
         commitment_loss = F.mse_loss(residuals, entries.detach())  # move residuals towards the codebooks
         vq_loss = self.num_levels * (residual_loss + self.commitment * commitment_loss)
 
