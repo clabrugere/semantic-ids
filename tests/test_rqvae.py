@@ -89,8 +89,6 @@ def test_init_codebooks_seeds_from_encoder_latents():
 
 
 def test_forward_gradients_reach_encoder_and_decoder_parameters():
-    """Only the quantizer's straight-through path is proven elsewhere (test_quantization.py); nothing
-    confirms the gradient actually completes the round trip through the encoder and decoder MLPs too."""
     model = RQVAE(
         input_dim=8,
         latent_dim=4,
@@ -112,10 +110,6 @@ def test_forward_gradients_reach_encoder_and_decoder_parameters():
 
 @pytest.mark.parametrize("codebook_update", [CodebookUpdate.GRADIENT, CodebookUpdate.EMA])
 def test_encode_never_mutates_quantizer_state_even_in_training_mode(codebook_update):
-    """encode() is @torch.no_grad() and never calls self.eval() -- that used to matter, because the
-    quantizer's forward() auto-updated usage_ema (and, under EMA codebooks, the codebooks themselves)
-    whenever self.training was True. forward() is pure now, so a no_grad peek can't mutate state
-    regardless of train/eval mode; only quantizer.update_() may."""
     model = RQVAE(
         input_dim=8,
         latent_dim=4,
