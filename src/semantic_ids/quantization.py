@@ -23,9 +23,9 @@ def quantize_residuals(
     """
 
     bs, dim = z.size(0), z.size(1)
-    entries = torch.empty((num_levels, bs, dim))
-    residuals = torch.empty((num_levels, bs, dim))
-    codes = torch.empty((bs, num_levels), dtype=torch.long)
+    entries = torch.empty((num_levels, bs, dim), device=z.device)
+    residuals = torch.empty((num_levels, bs, dim), device=z.device)
+    codes = torch.empty((bs, num_levels), dtype=torch.long, device=z.device)
 
     residual = z
 
@@ -165,21 +165,6 @@ class EmaResidualQuantizer(ResidualQuantizer):
         # Seeded so m_i/N_i reproduces the initial codebook, at the weight of one batch's evidence.
         self.register_buffer("cluster_size", torch.ones(self.num_levels, self.num_codes))
         self.register_buffer("cluster_sum", self.codebooks.detach().clone())
-
-    def forward(self, z: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """Returns (quantized_straight_through [B, dim], codes [B, num_levels], vq_loss)."""
-        entries, residuals, codes = quantize_residuals(z, self.codebooks, self.num_levels, self.normalize_codebook)
-
-        # F.mse_loss means over K*B*dim, so scale by K to keep the per-step sum of per-step means:
-        # without it the codebook's effective learning rate and the commitment weight both drop by K.
-        residual_loss = F.mse_loss(entries, residuals.detach())  # for EMA learning, codebooks are frozen
-        commitment_loss = F.mse_loss(residuals, entries.detach())  # move residuals towards the codebooks
-        vq_loss = self.num_levels * (residual_loss + self.commitment * commitment_loss)
-
-        # straight-through: gradients flow to the encoder as if quantization were the identity.
-        quantized_st = z + (entries.sum(0) - z).detach()
-
-        return quantized_st, codes, vq_loss
 
     @torch.no_grad()
     def update_(self, z: Tensor) -> None:

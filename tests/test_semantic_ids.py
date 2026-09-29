@@ -1,19 +1,19 @@
 import pytest
 import torch
 
-from semantic_ids.semantic_ids import SemanticIds, assign_disambiguation, remap_disambiguation_table
+from semantic_ids.semantic_ids import SemanticIds, assign_disambiguation
 
 
 @pytest.fixture
 def tmp_pt(tmp_path):
-    return tmp_path / "catalog.pt"
+    return tmp_path / "semantic_ids.pt"
 
 
 def test_save_writes_a_plain_dict_with_exactly_three_keys(tmp_pt):
     """This is the guard for the module's stated invariant: it must fail if `save` is ever changed
     to `torch.save(self)`, since torch's weights-only default rejects an arbitrary pickled object."""
-    catalog = SemanticIds(semantic_ids=torch.tensor([[0, 0], [1, 0]]), item_ids=torch.tensor([0, 1]), num_codes=4)
-    catalog.save(tmp_pt)
+    semantic_ids = SemanticIds(semantic_ids=torch.tensor([[0, 0], [1, 0]]), item_ids=torch.tensor([0, 1]), num_codes=4)
+    semantic_ids.save(tmp_pt)
 
     raw = torch.load(tmp_pt)
     assert isinstance(raw, dict)
@@ -21,15 +21,15 @@ def test_save_writes_a_plain_dict_with_exactly_three_keys(tmp_pt):
 
 
 def test_save_then_load_round_trips(tmp_pt):
-    catalog = SemanticIds(
+    semantic_ids = SemanticIds(
         semantic_ids=torch.tensor([[0, 0], [0, 1], [2, 3]]), item_ids=torch.tensor([5, 6, 7]), num_codes=8
     )
-    catalog.save(tmp_pt)
+    semantic_ids.save(tmp_pt)
     loaded = SemanticIds.load(tmp_pt)
 
-    assert torch.equal(loaded.semantic_ids, catalog.semantic_ids)
-    assert torch.equal(loaded.item_ids, catalog.item_ids)
-    assert loaded.num_codes == catalog.num_codes
+    assert torch.equal(loaded.semantic_ids, semantic_ids.semantic_ids)
+    assert torch.equal(loaded.item_ids, semantic_ids.item_ids)
+    assert loaded.num_codes == semantic_ids.num_codes
 
 
 def test_rejects_non_2d_semantic_ids():
@@ -98,45 +98,45 @@ def test_assign_disambiguation_is_not_per_row_permutation_invariant_but_the_id_s
 def test_build_semantic_ids_produces_unique_rows():
     torch.manual_seed(0)
     prefixes = torch.randint(0, 3, (20, 2))
-    catalog = SemanticIds.from_codes(prefixes, num_codes=8)
-    assert torch.unique(catalog.semantic_ids, dim=0).size(0) == catalog.num_items
+    semantic_ids = SemanticIds.from_codes(prefixes, num_codes=8)
+    assert torch.unique(semantic_ids.semantic_ids, dim=0).size(0) == semantic_ids.num_items
 
 
 def test_build_semantic_ids_defaults_item_ids_to_arange():
     prefixes = torch.tensor([[0, 0], [1, 1]])
-    catalog = SemanticIds.from_codes(prefixes, num_codes=4)
-    assert torch.equal(catalog.item_ids, torch.arange(2))
+    semantic_ids = SemanticIds.from_codes(prefixes, num_codes=4)
+    assert torch.equal(semantic_ids.item_ids, torch.arange(2))
 
 
 def test_build_semantic_ids_honours_explicit_item_ids():
     prefixes = torch.tensor([[0, 0], [1, 1]])
     item_ids = torch.tensor([100, 101])
-    catalog = SemanticIds.from_codes(prefixes, num_codes=4, item_ids=item_ids)
-    assert torch.equal(catalog.item_ids, item_ids)
+    semantic_ids = SemanticIds.from_codes(prefixes, num_codes=4, item_ids=item_ids)
+    assert torch.equal(semantic_ids.item_ids, item_ids)
 
 
 def test_collision_groups_may_exceed_num_codes():
-    """How many items collide on one prefix is a property of the catalog, not the codebook, so c_K's
+    """How many items collide on one prefix is a property of the semantic_ids, not the codebook, so c_K's
     vocabulary is floored at num_codes but not capped there. A group larger than num_codes widens it
     further rather than raising."""
     prefixes = torch.zeros(5, 2, dtype=torch.long)  # 5 identical prefixes against num_codes=4
-    catalog = SemanticIds.from_codes(prefixes, num_codes=4)
+    semantic_ids = SemanticIds.from_codes(prefixes, num_codes=4)
 
-    assert catalog.semantic_ids[:, -1].tolist() == [0, 1, 2, 3, 4]
-    assert catalog.num_disambiguation_codes == 5  # > num_codes, and that is not an error
-    assert catalog.num_codes == 4  # the scored vocabulary is untouched
+    assert semantic_ids.semantic_ids[:, -1].tolist() == [0, 1, 2, 3, 4]
+    assert semantic_ids.num_disambiguation_codes == 5  # > num_codes, and that is not an error
+    assert semantic_ids.num_codes == 4  # the scored vocabulary is untouched
 
 
 def test_num_disambiguation_codes_is_one_when_nothing_collides():
     """Every group here has exactly one member, so the largest group's size is 1. This property
     answers that honestly, with no floor. SemanticTrie's own same-named property floors this at
-    num_codes for a trie-internal encoding reason, but that floor does not belong on the catalog,
+    num_codes for a trie-internal encoding reason, but that floor does not belong on the semantic_ids,
     which only describes the data."""
-    catalog = SemanticIds.from_codes(torch.tensor([[0, 0], [0, 1], [1, 0]]), num_codes=4)
-    assert catalog.num_disambiguation_codes == 1
+    semantic_ids = SemanticIds.from_codes(torch.tensor([[0, 0], [0, 1], [1, 0]]), num_codes=4)
+    assert semantic_ids.num_disambiguation_codes == 1
 
 
-def test_empty_catalog_is_rejected():
+def test_empty_semantic_ids_is_rejected():
     """num_disambiguation_codes has no answer on M=0, and the trie it built could serve no beam."""
     with pytest.raises(ValueError, match="at least one item"):
         SemanticIds(
@@ -149,10 +149,10 @@ def test_empty_catalog_is_rejected():
 def test_zero_levels_is_rejected_before_it_can_reach_an_unanswerable_property():
     """num_disambiguation_codes reads semantic_ids[:, -1], which has no answer on K=0 either."""
     with pytest.raises(ValueError):
-        catalog = SemanticIds(
+        semantic_ids = SemanticIds(
             semantic_ids=torch.zeros(3, 0, dtype=torch.long), item_ids=torch.zeros(3, dtype=torch.long), num_codes=4
         )
-        assert catalog.num_disambiguation_codes >= 0
+        assert semantic_ids.num_disambiguation_codes >= 0
 
 
 #  device placement
@@ -169,49 +169,9 @@ def test_every_output_follows_the_input_device_not_the_default_device():
     prefixes = torch.tensor([[0, 0], [0, 0], [1, 0], [0, 0]])
     with torch.device("meta"):
         codes, _ = assign_disambiguation(prefixes)
-        catalog = SemanticIds.from_codes(prefixes, num_codes=4)
+        semantic_ids = SemanticIds.from_codes(prefixes, num_codes=4)
 
     assert codes.device == prefixes.device
     assert codes.tolist() == [0, 1, 0, 2]
-    assert catalog.semantic_ids.device == prefixes.device
-    assert catalog.item_ids.device == catalog.semantic_ids.device
-
-
-#  remap_disambiguation_table
-
-
-def test_remap_copies_the_shared_prefix_exactly():
-    old = torch.randn(3, 8)
-    new = torch.randn(3, 8)
-    merged = remap_disambiguation_table(old, new)
-    assert torch.equal(merged, old)
-
-
-def test_remap_fills_a_grown_tail_with_the_mean_of_the_copied_prefix():
-    old = torch.randn(3, 8)
-    new = torch.randn(6, 8)
-    merged = remap_disambiguation_table(old, new)
-    assert torch.equal(merged[:3], old)
-    assert torch.allclose(merged[3:], old.mean(dim=0).expand(3, 8))
-
-
-def test_remap_truncates_without_error_when_the_table_shrinks():
-    old = torch.randn(6, 8)
-    new = torch.randn(3, 8)
-    merged = remap_disambiguation_table(old, new)
-    assert torch.equal(merged, old[:3])
-
-
-def test_remap_does_not_mutate_either_argument():
-    old, new = torch.randn(3, 8), torch.randn(6, 8)
-    old_ref, new_ref = old.clone(), new.clone()
-    merged = remap_disambiguation_table(old, new)
-    assert torch.equal(old, old_ref)
-    assert torch.equal(new, new_ref)
-    assert merged.data_ptr() != old.data_ptr()
-    assert merged.data_ptr() != new.data_ptr()
-
-
-def test_remap_rejects_a_dimension_mismatch():
-    with pytest.raises(ValueError):
-        remap_disambiguation_table(torch.randn(3, 8), torch.randn(6, 16))
+    assert semantic_ids.semantic_ids.device == prefixes.device
+    assert semantic_ids.item_ids.device == semantic_ids.semantic_ids.device

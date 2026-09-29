@@ -40,6 +40,9 @@ class SemanticIds:
         if self.semantic_ids.size(1) < 1:
             raise ValueError("semantic_ids must have at least one level")
 
+    def __len__(self) -> int:
+        return self.semantic_ids.size(0)
+
     @property
     def num_items(self) -> int:
         return self.semantic_ids.size(0)
@@ -111,34 +114,3 @@ def assign_disambiguation(prefixes: Tensor, sort_key: Tensor | None = None) -> t
     disambiguated[order] = within_group
 
     return disambiguated, counts
-
-
-def remap_disambiguation_table(old_weight: Tensor, new_weight: Tensor) -> Tensor:
-    """Carry a disambiguation embedding table across a resync that changed its shape.
-
-    Row ``j`` means "the ``j``-th member of its collision group", not tied to any specific item, so
-    rows are copied by index rather than followed per item. Rows beyond the old table's size get the
-    mean of the copied rows instead of a fresh-init guess.
-
-    Breaks silently if the old and new tables were built with different disambiguation ``sort_key``
-    policies: row ``j`` then means a different thing in each, and the copied value is meaningless.
-
-    Args:
-        old_weight: ``FloatTensor[ndc_old, dim]``. The checkpoint's ``disambiguation_table.weight``.
-        new_weight: ``FloatTensor[ndc_new, dim]``. The freshly-built model's own table, whose shape
-            (and device/dtype) the result matches. Read only for its shape, never mutated.
-
-    Returns:
-        A new ``FloatTensor[ndc_new, dim]``: ``old_weight``'s shared prefix, followed by the mean of
-        that prefix for any grown tail. Neither argument is mutated.
-    """
-    if old_weight.size(1) != new_weight.size(1):
-        raise ValueError(f"embedding dim mismatch: old={old_weight.size(1)}, new={new_weight.size(1)}")
-
-    n = min(old_weight.size(0), new_weight.size(0))
-    merged = new_weight.clone()
-    merged[:n] = old_weight[:n]
-    if new_weight.size(0) > n:
-        merged[n:] = old_weight[:n].mean(dim=0)
-
-    return merged

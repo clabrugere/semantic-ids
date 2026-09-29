@@ -8,45 +8,7 @@ Implements residual quantization by snapping level's residual to one learned vec
 
 ## Usage
 
-```python
-# declare the model
-model = RQVAE(
-    content_dim=content_dim,
-    latent_dim=latent_dim,  # dimension of the quantized latent
-    num_levels=num_levels,  # number of codebooks, including disambiguation
-    num_codes=num_codes,  # number of codes per codebook
-    encoder_hidden_dims=encoder_hidden,  # dims of intermediate layers of the encoder
-    decoder_hidden_dims=decoder_hidden,  # dims of the intermediate layers of the decoder
-    commitment=commitment,  # weight of the loss component keeping residuals close to their assigned code
-    normalize_codebook=normalize_codebook,  # whether to normalize the codebooks for assignment only
-    codebook_update=CodebookUpdate.GRADIENT,  # Gradient or EMA
-)
-model.init_codebooks_(embeddings, generator)  # embeddings can be a sample
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-rng = torch.Generator()
-
-# train the model
-for step, batch in enumerat(embedding_dataloader):
-    reconstructed, _, vq_loss = model(batch)
-    reconstructed_loss = distortion_loss(reconstructed, batch, distortion)
-
-    loss = reconstructed_loss + vq_loss
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    # Both after the step, so neither an EMA centroid nor a reseeded row is immediately overwritten by
-    # this batch's gradient update, and both re-encode against the encoder as it now stands.
-    if ema_codebooks:
-        model.quantizer.update_codebooks_(model.encoder(batch))
-
-    if step > 0 and step % expire_every == 0:
-        dead = model.quantizer.expire_dead_codes_(model.encoder(batch), rng, expiry_threshold)
-
-# encode embedding to code sequences
-model.eval()
-semantic_ids = model.export_semantic_ids(embedding_dataloader)
-```
+Refer to `example/train.py` to train the model and then generate code sequences.
 
 ## How It Works
 

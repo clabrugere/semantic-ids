@@ -7,7 +7,12 @@ from semantic_ids.rqvae import RQVAE, CodebookUpdate
 
 def test_rqvae_forward_shapes():
     model = RQVAE(
-        input_dim=8, latent_dim=4, num_levels=3, num_codes=6, encoder_hidden_dims=[4], decoder_hidden_dims=[4]
+        input_dim=8,
+        latent_dim=4,
+        num_levels=3,
+        num_codes=6,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
     )
     x = torch.randn(5, 8)
     reconstructed, codes, vq_loss = model(x)
@@ -18,36 +23,47 @@ def test_rqvae_forward_shapes():
     assert bool((codes >= 0).all()) and bool((codes < 6).all())
 
 
-@pytest.mark.parametrize("batch_size", [None, 1, 2, 5])
-def test_rqvae_encode_matches_forward_codes(batch_size):
+def test_rqvae_encode_matches_forward_codes():
     model = RQVAE(
-        input_dim=8, latent_dim=4, num_levels=3, num_codes=6, encoder_hidden_dims=[4], decoder_hidden_dims=[4]
+        input_dim=8,
+        latent_dim=4,
+        num_levels=3,
+        num_codes=6,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
     )
     x = torch.randn(5, 8)
 
     _, codes, _ = model(x)
-    encoded = model.encode(x, batch_size)
+    encoded = model.encode(x)
     assert torch.equal(encoded, codes)
 
 
 def test_rqvae_encode_disables_grad_tracking():
     model = RQVAE(
-        input_dim=8, latent_dim=4, num_levels=2, num_codes=4, encoder_hidden_dims=[4], decoder_hidden_dims=[4]
+        input_dim=8,
+        latent_dim=4,
+        num_levels=2,
+        num_codes=4,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
     )
     x = torch.randn(3, 8, requires_grad=True)
     assert not model.encode(x).requires_grad
 
 
-@pytest.mark.parametrize("batch_size", [None, 1, 2, 5])
-def test_encode_with_residual_norm_matches_manual_computation(batch_size):
-    """Also covers batch-size invariance: a chunking bug would show up as a mismatch against the
-    unchunked manual recomputation for every batch_size but None."""
+def test_encode_with_residual_norm_matches_manual_computation():
     model = RQVAE(
-        input_dim=8, latent_dim=4, num_levels=3, num_codes=6, encoder_hidden_dims=[4], decoder_hidden_dims=[4]
+        input_dim=8,
+        latent_dim=4,
+        num_levels=3,
+        num_codes=6,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
     )
     x = torch.randn(5, 8)
 
-    codes, residual_norm = model.encode_with_residual_norm(x, batch_size)
+    codes, residual_norm = model.encode_with_residual_norm(x)
     z = model.encoder(x)
     quantized, expected_codes, _ = model.quantizer(z)
 
@@ -57,7 +73,12 @@ def test_encode_with_residual_norm_matches_manual_computation(batch_size):
 
 def test_init_codebooks_seeds_from_encoder_latents():
     model = RQVAE(
-        input_dim=8, latent_dim=4, num_levels=2, num_codes=5, encoder_hidden_dims=[4], decoder_hidden_dims=[4]
+        input_dim=8,
+        latent_dim=4,
+        num_levels=2,
+        num_codes=5,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
     )
     initial_codebooks = model.quantizer.codebooks.clone()
     x = torch.randn(50, 8)
@@ -71,7 +92,12 @@ def test_forward_gradients_reach_encoder_and_decoder_parameters():
     """Only the quantizer's straight-through path is proven elsewhere (test_quantization.py); nothing
     confirms the gradient actually completes the round trip through the encoder and decoder MLPs too."""
     model = RQVAE(
-        input_dim=8, latent_dim=4, num_levels=2, num_codes=5, encoder_hidden_dims=[6], decoder_hidden_dims=[6]
+        input_dim=8,
+        latent_dim=4,
+        num_levels=2,
+        num_codes=5,
+        encoder_hidden_dims=[6],
+        decoder_hidden_dims=[6],
     )
     x = torch.randn(5, 8)
 

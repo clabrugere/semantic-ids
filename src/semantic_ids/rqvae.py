@@ -5,7 +5,6 @@ import torch
 from torch import Tensor, nn
 
 from semantic_ids.quantization import EmaResidualQuantizer, ResidualQuantizer
-from semantic_ids.semantic_ids import SemanticIds
 
 
 class MLP(nn.Sequential):
@@ -43,6 +42,14 @@ class RQVAE(nn.Module):
         self.quantizer = quantizer(num_levels, num_codes, latent_dim, commitment, normalize_codebook)
         self.decoder = MLP(latent_dim, input_dim, decoder_hidden_dims)
 
+    @property
+    def num_levels(self) -> int:
+        return self.quantizer.num_levels
+
+    @property
+    def num_codes(self) -> int:
+        return self.quantizer.num_codes
+
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Returns ``(reconstructed, codes, vq_loss)``."""
         z = self.encoder(x)
@@ -65,33 +72,20 @@ class RQVAE(nn.Module):
         self.quantizer.kmeans_init_(latents, generator, kmeans_max_samples)
 
     @torch.no_grad()
-    def encode_with_residual_norm(self, x: Tensor, batch_size: int | None = None) -> tuple[Tensor, Tensor]:
+    def encode_with_residual_norm(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Codes plus each row's leftover residual norm ``‖z - quantized‖`` after all ``K-1`` levels.
 
-        Everyone sharing a full prefix reconstructs to the same ``quantized`` point, so this norm is
-        each item's distance from its group's shared centroid.
+        Every item sharing a full prefix reconstructs to the same ``quantized`` point, so this norm is
+        the distance from its group's centroid.
         """
-        batch_size = batch_size or x.size(0)
-        codes_chunks, residual_norm_chunks = [], []
-        for chunk in x.split(batch_size):
-            z = self.encoder(chunk)
-            quantized, chunk_codes, _ = self.quantizer(z)
-            codes_chunks.append(chunk_codes)
-            residual_norm_chunks.append((z - quantized).norm(dim=-1))
+        z = self.encoder(x)
+        quantized, chunk_codes, _ = self.quantizer(z)
+        residual_norm = (z - quantized).norm(dim=-1)
 
-        return torch.cat(codes_chunks), torch.cat(residual_norm_chunks)
+        return chunk_codes, residual_norm
 
     @torch.no_grad()
-    def encode(self, x: Tensor, batch_size: int | None = None) -> Tensor:
+    def encode(self, x: Tensor) -> Tensor:
         """Encode inputs: embeddings -> codes [B, num_levels]."""
-        codes, _ = self.encode_with_residual_norm(x, batch_size)
+        codes, _ = self.encode_with_residual_norm(x)
         return codes
-
-    @torch.no_grad()
-    def export_semantic_ids(self, data: Tensor, batch_size: int | None = None) -> SemanticIds:
-        """Encode every row of ``data``, disambiguate collisions, and package as a :class:`~semantic_ids.semantic_ids.SemanticIds`.
-
-        Within a collision group, the disambiguation ordinal is ranked by ascending distance to the group's centroid.
-        """
-        prefixes, residual_norm = self.encode_with_residual_norm(data, batch_size)  # [M, K-1], [M]
-        return SemanticIds.from_codes(prefixes, self.quantizer.num_codes, sort_key=residual_norm)
