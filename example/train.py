@@ -52,7 +52,7 @@ def evaluate(model: RQVAE, val_dataloader: DataLoader, device: torch.device) -> 
     all_codes = []
     for val_batch in val_dataloader:
         val_batch = val_batch[0].to(device)
-        reconstructed, codes, _ = model(val_batch)
+        _, reconstructed, codes, _ = model(val_batch)
         reconstruction_loss += F.mse_loss(reconstructed, val_batch)
         all_codes.append(codes)
 
@@ -219,7 +219,7 @@ def main() -> None:
     semantic_ids = SemanticIds.from_codes(codes_sequences, model.num_codes, sort_key=residual_norms)
     logger.info("export | semantic IDs generated | count=%s", len(semantic_ids))
 
-    torch.save(semantic_ids, config.out)
+    semantic_ids.save(config.out)
     logger.info("export | semantic IDs saved to %s", config.out)
 
 
