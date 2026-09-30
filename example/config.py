@@ -25,7 +25,7 @@ class Config:
     normalize_codebook: bool
     codebook_update: CodebookUpdate
     expiry_threshold: float
-    expire_every: int = 200
+    revive_every: int = 200
 
     @staticmethod
     def add_arguments(parser: ArgumentParser) -> None:
@@ -51,7 +51,7 @@ class Config:
             "--codebook-update", type=CodebookUpdate, choices=list(CodebookUpdate), default=CodebookUpdate.GRADIENT
         )
         parser.add_argument("--expiry-threshold", type=float, default=0.1)
-        parser.add_argument("--expire-every", type=int, default=200)
+        parser.add_argument("--revive-every", type=int, default=200)
 
     @classmethod
     def from_args(cls, args: Namespace) -> Config:
@@ -73,5 +73,5 @@ class Config:
             normalize_codebook=args.normalize_codebook,
             codebook_update=args.codebook_update,
             expiry_threshold=args.expiry_threshold,
-            expire_every=args.expire_every,
+            revive_every=args.revive_every,
         )

@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -15,8 +17,10 @@ def test_rqvae_forward_shapes():
         decoder_hidden_dims=[4],
     )
     x = torch.randn(5, 8)
-    reconstructed, codes, vq_loss = model(x)
+    latent, reconstructed, codes, vq_loss = model(x)
 
+    assert latent.size() == (5, 4)
+    assert latent.requires_grad
     assert reconstructed.size() == x.size()
     assert codes.size() == (5, 3)
     assert vq_loss.dim() == 0
@@ -34,7 +38,7 @@ def test_rqvae_encode_matches_forward_codes():
     )
     x = torch.randn(5, 8)
 
-    _, codes, _ = model(x)
+    _, _, codes, _ = model(x)
     encoded = model.encode(x)
     assert torch.equal(encoded, codes)
 
@@ -64,11 +68,11 @@ def test_encode_with_residual_norm_matches_manual_computation():
     x = torch.randn(5, 8)
 
     codes, residual_norm = model.encode_with_residual_norm(x)
-    z = model.encoder(x)
-    quantized, expected_codes, _ = model.quantizer(z)
+    latent = model.encoder(x)
+    quantized, expected_codes, _ = model.quantizer(latent)
 
     assert torch.equal(codes, expected_codes)
-    assert torch.allclose(residual_norm, (z - quantized).norm(dim=-1))
+    assert torch.allclose(residual_norm, (latent - quantized).norm(dim=-1))
 
 
 def test_init_codebooks_seeds_from_encoder_latents():
@@ -99,7 +103,7 @@ def test_forward_gradients_reach_encoder_and_decoder_parameters():
     )
     x = torch.randn(5, 8)
 
-    reconstructed, _, vq_loss = model(x)
+    _, reconstructed, _, vq_loss = model(x)
     (F.mse_loss(reconstructed, x) + vq_loss).backward()
 
     for module in (model.encoder, model.decoder):
@@ -129,3 +133,51 @@ def test_encode_never_mutates_quantizer_state_even_in_training_mode(codebook_upd
 
     assert torch.equal(model.quantizer.usage_ema, usage_before)
     assert torch.equal(model.quantizer.codebooks, codebooks_before)
+
+
+def test_update_codebook_usage_delegates_without_encoding_or_revival():
+    model = RQVAE(
+        input_dim=8,
+        latent_dim=4,
+        num_levels=2,
+        num_codes=5,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
+    )
+    latent = torch.randn(5, 4, requires_grad=True)
+
+    with (
+        patch.object(model.encoder, "forward") as encoder_forward,
+        patch.object(model.quantizer, "update_") as update,
+        patch.object(model.quantizer, "revive_dead_codes_") as revive,
+    ):
+        model.update_codebook_usage(latent)
+
+        encoder_forward.assert_not_called()
+        update.assert_called_once_with(latent)
+        revive.assert_not_called()
+
+
+def test_revive_dead_codes_delegates_without_encoding_or_update():
+    model = RQVAE(
+        input_dim=8,
+        latent_dim=4,
+        num_levels=2,
+        num_codes=5,
+        encoder_hidden_dims=[4],
+        decoder_hidden_dims=[4],
+    )
+    latent = torch.randn(5, 4, requires_grad=True)
+    generator = torch.Generator().manual_seed(1)
+    expiry_threshold = 0.1
+
+    with (
+        patch.object(model.encoder, "forward") as encoder_forward,
+        patch.object(model.quantizer, "update_") as update,
+        patch.object(model.quantizer, "revive_dead_codes_") as revive,
+    ):
+        model.revive_dead_codes(latent, generator, expiry_threshold)
+
+        encoder_forward.assert_not_called()
+        update.assert_not_called()
+        revive.assert_called_once_with(latent, generator, expiry_threshold)

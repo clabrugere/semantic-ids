@@ -50,13 +50,21 @@ class RQVAE(nn.Module):
     def num_codes(self) -> int:
         return self.quantizer.num_codes
 
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """Returns ``(reconstructed, codes, vq_loss)``."""
-        z = self.encoder(x)
-        quantized, codes, vq_loss = self.quantizer(z)
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Returns ``(latent, reconstructed, codes, vq_loss)``."""
+        latent = self.encoder(x)
+        quantized, codes, vq_loss = self.quantizer(latent)
         reconstructed = self.decoder(quantized)
 
-        return reconstructed, codes, vq_loss
+        return latent, reconstructed, codes, vq_loss
+
+    @torch.no_grad()
+    def update_codebook_usage(self, latent: Tensor):
+        self.quantizer.update_(latent)
+
+    @torch.no_grad()
+    def revive_dead_codes(self, latent: Tensor, generator: torch.Generator, expiry_threshold: float):
+        self.quantizer.revive_dead_codes_(latent, generator, expiry_threshold)
 
     @torch.no_grad()
     def init_codebooks_(
@@ -73,14 +81,14 @@ class RQVAE(nn.Module):
 
     @torch.no_grad()
     def encode_with_residual_norm(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        """Codes plus each row's leftover residual norm ``‖z - quantized‖`` after all ``K-1`` levels.
+        """Codes plus each row's leftover residual norm ``‖latent - quantized‖`` after all ``K-1`` levels.
 
         Every item sharing a full prefix reconstructs to the same ``quantized`` point, so this norm is
         the distance from its group's centroid.
         """
-        z = self.encoder(x)
-        quantized, chunk_codes, _ = self.quantizer(z)
-        residual_norm = (z - quantized).norm(dim=-1)
+        latent = self.encoder(x)
+        quantized, chunk_codes, _ = self.quantizer(latent)
+        residual_norm = (latent - quantized).norm(dim=-1)
 
         return chunk_codes, residual_norm
 

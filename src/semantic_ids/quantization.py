@@ -8,26 +8,26 @@ from semantic_ids.kmeans import kmeans, nearest_code
 
 
 def quantize_residuals(
-    z: Tensor,
+    latent: Tensor,
     codebooks: Tensor,
     num_levels: int,
     normalize: bool,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    """Run the residual chain. Returns ``(entries [num_levels, B, dim], residuals [num_levels, B, dim], codes [B, num_levels])``.
+    """Run the residual chain. Returns ``(entries [num_levels, B, dim], residuals [num_levels, B, dim], codes [B, num_levels])`` for the given latent vectors.
 
-    ``residuals[k]`` is the residual entering step k (so ``residuals[0] is z``) and ``entries[k]`` is the code picked for it.
+    ``residuals[k]`` is the residual entering step k (so ``residuals[0] is latent``) and ``entries[k]`` is the code picked for it.
 
     With ``normalize``, a code is chosen by direction alone (the codebook is unit-normalized before the nearest-centroid
     search), but the entry returned is still the raw row. Per-code norms therefore stop contributing to attribution and only
     affect reconstruction, so one centroid cannot capture assignments by magnitude.
     """
 
-    bs, dim = z.size(0), z.size(1)
-    entries = torch.empty((num_levels, bs, dim), device=z.device)
-    residuals = torch.empty((num_levels, bs, dim), device=z.device)
-    codes = torch.empty((bs, num_levels), dtype=torch.long, device=z.device)
+    bs, dim = latent.size(0), latent.size(1)
+    entries = torch.empty((num_levels, bs, dim), device=latent.device)
+    residuals = torch.empty((num_levels, bs, dim), device=latent.device)
+    codes = torch.empty((bs, num_levels), dtype=torch.long, device=latent.device)
 
-    residual = z
+    residual = latent
 
     for k in range(num_levels):
         raw_codebook = codebooks[k]  # [V, dim]
@@ -68,16 +68,16 @@ class ResidualQuantizer(nn.Module):
         self.commitment = commitment
         self.normalize_codebook = normalize_codebook
         self.usage_decay = usage_decay
-        # Running per-code share of assignments, so expire_dead_codes_ can tell a code that never gets
+        # Running per-code share of assignments, so revive_dead_codes_ can tell a code that never gets
         # assigned from one that merely got no assignment in this batch. A share rather than a count, so it
         # does not scale with the batch size. Initialized at the uniform share, so nothing looks dead before
         # training runs.
         self.register_buffer("usage_ema", torch.full((num_levels, num_codes), 1.0 / num_codes))
         self.codebooks = nn.Parameter(torch.randn(num_levels, num_codes, dim) * 0.1)  # flattened [K, V, dim] codebooks
 
-    def forward(self, z: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    def forward(self, latent: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Returns (quantized_straight_through [B, dim], codes [B, num_levels], vq_loss)."""
-        entries, residuals, codes = quantize_residuals(z, self.codebooks, self.num_levels, self.normalize_codebook)
+        entries, residuals, codes = quantize_residuals(latent, self.codebooks, self.num_levels, self.normalize_codebook)
 
         # F.mse_loss means over K*B*dim, so scale by K to keep the per-step sum of per-step means:
         # without it the codebook's effective learning rate and the commitment weight both drop by K.
@@ -86,16 +86,16 @@ class ResidualQuantizer(nn.Module):
         vq_loss = self.num_levels * (residual_loss + self.commitment * commitment_loss)
 
         # straight-through: gradients flow to the encoder as if quantization were the identity.
-        quantized_st = z + (entries.sum(0) - z).detach()
+        quantized_st = latent + (entries.sum(0) - latent).detach()
 
         return quantized_st, codes, vq_loss
 
     @torch.no_grad()
-    def update_(self, z: Tensor) -> None:
+    def update_(self, latent: Tensor) -> None:
         """Fold one batch of latents' assignments into ``usage_ema``. Call once per real training step,
         after ``backward()``/``optimizer.step()``.
         """
-        _, _, codes = quantize_residuals(z, self.codebooks, self.num_levels, self.normalize_codebook)
+        _, _, codes = quantize_residuals(latent, self.codebooks, self.num_levels, self.normalize_codebook)
         self.update_usage_(codes)
 
     @torch.no_grad()
@@ -109,16 +109,16 @@ class ResidualQuantizer(nn.Module):
         self.usage_ema.mul_(self.usage_decay).add_((1 - self.usage_decay) * counts / codes.size(0))
 
     @torch.no_grad()
-    def expire_dead_codes_(self, z: Tensor, generator: torch.Generator, threshold: float) -> Tensor:
-        """Reseed codes whose usage share fell below ``threshold`` times uniform onto observed residuals.
+    def revive_dead_codes_(self, latent: Tensor, generator: torch.Generator, threshold: float) -> Tensor:
+        """Revive codes whose usage share fell below ``threshold`` times onto observed residuals.
 
         ``threshold`` is a fraction of the uniform share ``1/num_codes``, so it means the same thing at
-        any ``num_codes`` or batch size: 0.1 expires codes assigned less than a tenth as often as uniform.
+        any ``num_codes`` or batch size: 0.1 revives codes assigned less than a tenth as often as uniform.
 
         Returns the ``BoolTensor[num_levels, num_codes]`` mask of what was reseeded. Deliberately not
         called from ``forward``: it writes to ``codebooks``, which must not happen mid-graph.
         """
-        _, residuals, _ = quantize_residuals(z, self.codebooks, self.num_levels, self.normalize_codebook)
+        _, residuals, _ = quantize_residuals(latent, self.codebooks, self.num_levels, self.normalize_codebook)
         dead = self.usage_ema < threshold / self.num_codes  # [num_levels, num_codes]
 
         for k in range(self.num_levels):
@@ -126,20 +126,20 @@ class ResidualQuantizer(nn.Module):
             if num_dead == 0:
                 continue
             # With replacement: a heavily collapsed level can need more seeds than the batch has rows.
-            picks = torch.randint(residuals.size(1), (num_dead,), generator=generator, device=z.device)
+            picks = torch.randint(residuals.size(1), (num_dead,), generator=generator, device=latent.device)
             self.codebooks[k][dead[k]] = residuals[k][picks]
             self.usage_ema[k][dead[k]] = 1.0 / self.num_codes  # a fresh code is not yet evidence of death
 
         return dead
 
     @torch.no_grad()
-    def kmeans_init_(self, z: Tensor, generator: torch.Generator, max_samples: int):
+    def kmeans_init_(self, latent: Tensor, generator: torch.Generator, max_samples: int):
         """Seed each stage's codebook with k-means centroids of that stage's residuals."""
-        if z.size(0) > max_samples:
-            samples = torch.randperm(z.size(0), generator=generator)[:max_samples].to(z.device)
-            z = z[samples]
+        if latent.size(0) > max_samples:
+            samples = torch.randperm(latent.size(0), generator=generator)[:max_samples].to(latent.device)
+            latent = latent[samples]
 
-        residual = z
+        residual = latent
 
         for k in range(self.num_levels):
             centroids = kmeans(residual, self.num_codes, generator)
@@ -167,11 +167,11 @@ class EmaResidualQuantizer(ResidualQuantizer):
         self.register_buffer("cluster_sum", self.codebooks.detach().clone())
 
     @torch.no_grad()
-    def update_(self, z: Tensor) -> None:
+    def update_(self, latent: Tensor) -> None:
         """Fold one batch of latents into ``usage_ema`` and the EMA codebooks. Call once per real
         training step, after ``backward()``/``optimizer.step()``.
         """
-        _, residuals, codes = quantize_residuals(z, self.codebooks, self.num_levels, self.normalize_codebook)
+        _, residuals, codes = quantize_residuals(latent, self.codebooks, self.num_levels, self.normalize_codebook)
         self.update_usage_(codes)
         self.update_codebooks_(residuals, codes)
 
@@ -206,15 +206,15 @@ class EmaResidualQuantizer(ResidualQuantizer):
         self.cluster_sum[mask] = self.codebooks.detach()[mask]
 
     @torch.no_grad()
-    def expire_dead_codes_(self, z: Tensor, generator: torch.Generator, threshold: float) -> Tensor:
+    def revive_dead_codes_(self, latent: Tensor, generator: torch.Generator, threshold: float) -> Tensor:
         """Reseed as the base class does, then re-point the EMAs at the rows it rewrote."""
-        dead = super().expire_dead_codes_(z, generator, threshold)
+        dead = super().revive_dead_codes_(latent, generator, threshold)
         self.resync_accumulators_(dead)
 
         return dead
 
     @torch.no_grad()
-    def kmeans_init_(self, z: Tensor, generator: torch.Generator, max_samples):
+    def kmeans_init_(self, latent: Tensor, generator: torch.Generator, max_samples):
         """Seed as the base class does, then re-point the EMAs: every level was rewritten."""
-        super().kmeans_init_(z, generator, max_samples)
+        super().kmeans_init_(latent, generator, max_samples)
         self.resync_accumulators_()

@@ -76,7 +76,7 @@ def train(
     max_steps: int,
     lr: float,
     expiry_threshold: float,
-    expire_every: int,
+    revive_every: int,
     device: torch.device,
     eval_every: int,
     log_every: int = 1000,
@@ -93,18 +93,17 @@ def train(
             batch = next(batch_iterator)
 
         batch = batch[0].to(device)
-        reconstructed, _, vq_loss = model(batch)
+        latent, reconstructed, _, vq_loss = model(batch)
         reconstruction_loss = F.mse_loss(reconstructed, batch)
         loss = reconstruction_loss + vq_loss
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # Update code usage and in the case of EMA, the codebooks
-        model.quantizer.update_(model.encoder(batch))
-
-        if expiry_threshold > 0 and step % expire_every == 0:
-            model.quantizer.expire_dead_codes_(model.encoder(batch), generator, expiry_threshold)
+        # Update the codes usage and potentially expiring dead codes
+        model.update_codebook_usage(latent)
+        if expiry_threshold > 0 and step % revive_every == 0:
+            model.revive_dead_codes(latent, generator, expiry_threshold)
 
         if step == 1 or step % log_every == 0:
             logger.info(
@@ -197,7 +196,7 @@ def main() -> None:
         config.max_steps,
         config.lr,
         config.expiry_threshold,
-        config.expire_every,
+        config.revive_every,
         device,
         config.eval_every,
     )
