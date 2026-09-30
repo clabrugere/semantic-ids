@@ -1,8 +1,8 @@
-# Semantic IDs learned with RQ-VAE
+# Semantic IDs learned with residual quantization
 
 Exploring Semantic IDs for generative recommendation.
 
-Train a model mapping dense embeddings to sequences of codes $[c_0, ..., c_{K-1}]$, or semantic-ids, using residual quantization and export the resulting representation with collision resolution for consumption by a generative recommender.
+Train a model mapping dense embeddings to sequences of codes $[c_0, ..., c_{K-1}]$, or semantic-ids, using residual quantization (RQ-VAE) and export the resulting representation with collision resolution for consumption by a generative recommender.
 
 Implements residual quantization by snapping each level's residual to one learned vector of the level's codebook, with dead-code revival and k-means codebook initialization. K levels are used for semantic codes, plus another one to disambiguate colliding prefixes at export time, to ensure each item gets a distinct code sequence.
 
