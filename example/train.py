@@ -83,7 +83,6 @@ def train(
 ):
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     generator = torch.Generator(device=device)
-    reseeded = torch.zeros(model.quantizer.num_levels, dtype=torch.long, device=device)
     batch_iterator = iter(train_dataloader)
 
     for step in range(1, max_steps + 1):
@@ -105,8 +104,7 @@ def train(
         model.quantizer.update_(model.encoder(batch))
 
         if expiry_threshold > 0 and step % expire_every == 0:
-            dead = model.quantizer.expire_dead_codes_(model.encoder(batch), generator, expiry_threshold)
-            reseeded += dead.sum(1)
+            model.quantizer.expire_dead_codes_(model.encoder(batch), generator, expiry_threshold)
 
         if step == 1 or step % log_every == 0:
             logger.info(
